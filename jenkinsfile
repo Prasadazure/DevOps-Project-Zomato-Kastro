@@ -1,112 +1,124 @@
 pipeline {
     agent any
 
-    tools {
-        jdk 'jdk17'            // Must match Jenkins JDK installation name
-        nodejs 'node23'        // Must match Jenkins NodeJS installation name
-    }
-
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'    // Must match your SonarScanner installation
+        // ----- Update these paths for your Jenkins server -----
+        JAVA_HOME = '/usr/lib/jvm/java-17-openjdk-amd64'  // Example Java path (check using: which java)
+        PATH = "${JAVA_HOME}/bin:${env.PATH}"
+
+        // Sonar Scanner installation name as configured in Jenkins -> Manage Jenkins -> Global Tool Configuration
+        SCANNER_HOME = tool 'sonar-scanner'
+
+        // DockerHub & SonarQube credentials IDs configured in Jenkins
+        DOCKER_CREDENTIALS = 'docker'
+        SONARQUBE_SERVER   = 'sonar-server'
+        SONARQUBE_TOKEN    = 'Sonar-token'
     }
 
     stages {
 
-        stage("Clean Workspace") {
+        stage('Check Tools') {
             steps {
-                cleanWs()
+                echo 'Checking Java, Node, and NPM versions...'
+                sh 'java -version'
+                sh 'javac -version'
+                sh 'node -v'
+                sh 'npm -v'
             }
         }
 
-        stage("Check Java & Node") {
+        stage('Install NPM Dependencies') {
             steps {
-                sh "java -version"
-                sh "javac -version"
-                sh "node -v"
-                sh "npm -v"
+                echo 'Installing Node.js dependencies...'
+                sh 'npm install'
             }
         }
 
-        stage("Git Checkout") {
+        stage('SonarQube Analysis') {
             steps {
-                git 'https://github.com/Prasadazure/DevOps-Project-Zomato-Kastro.git'
-            }
-        }
-
-        stage("SonarQube Analysis") {
-            steps {
-                withSonarQubeEnv('sonar-server') {
-                    withEnv([
-                        "JAVA_HOME=${tool 'jdk17'}",
-                        "PATH+JAVA=${tool 'jdk17'}/bin"
-                    ]) {
-                        sh """
-                            $SCANNER_HOME/bin/sonar-scanner \
-                                -Dsonar.projectName=zomato \
-                                -Dsonar.projectKey=zomato
-                        """
-                    }
+                echo 'Running SonarQube Code Analysis...'
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                            -Dsonar.projectKey=zomato \
+                            -Dsonar.projectName=zomato \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                    """
                 }
             }
         }
 
-        stage("Code Quality Gate") {
+        stage('Code Quality Gate') {
             steps {
-                waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                echo 'Waiting for SonarQube Quality Gate result...'
+                waitForQualityGate abortPipeline: false, credentialsId: "${SONARQUBE_TOKEN}"
             }
         }
 
-        stage("Install NPM Dependencies") {
+        stage('OWASP Dependency Check') {
             steps {
-                sh "npm install"
-            }
-        }
-
-        stage("OWASP Dependency Check") {
-            steps {
+                echo 'Running OWASP Dependency Vulnerability Scan...'
                 dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit -n',
                                 odcInstallation: 'DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
 
-        stage("Trivy File Scan") {
+        stage('Trivy File Scan') {
             steps {
-                sh "trivy fs . > trivy.txt"
+                echo 'Running Trivy File System Scan...'
+                sh 'trivy fs . > trivy.txt'
             }
         }
 
-        stage("Build Docker Image") {
+        stage('Build Docker Image') {
             steps {
-                sh "docker build -t zomato ."
+                echo 'Building Docker Image...'
+                sh 'docker build -t zomato .'
             }
         }
 
-        stage("Tag & Push to DockerHub") {
+        stage('Push Docker Image to DockerHub') {
             steps {
-                withDockerRegistry(credentialsId: 'docker', url: 'https://index.docker.io/v1/') {
-                    sh "docker tag zomato adminprasad/zomato:latest"
-                    sh "docker push adminprasad/zomato:latest"
+                echo 'Tagging & Pushing Docker Image to DockerHub...'
+                withDockerRegistry(credentialsId: "${DOCKER_CREDENTIALS}", url: 'https://index.docker.io/v1/') {
+                    sh '''
+                        docker tag zomato adminprasad/zomato:latest
+                        docker push adminprasad/zomato:latest
+                    '''
                 }
             }
         }
 
-        stage("Docker Scout Image") {
+        stage('Docker Scout Image Scan') {
             steps {
-                withDockerRegistry(credentialsId: 'docker', url: 'https://index.docker.io/v1/') {
-                    sh "docker-scout quickview adminprasad/zomato:latest"
-                    sh "docker-scout cves adminprasad/zomato:latest"
-                    sh "docker-scout recommendations adminprasad/zomato:latest"
+                echo 'Running Docker Scout Image Scans...'
+                withDockerRegistry(credentialsId: "${DOCKER_CREDENTIALS}", url: 'https://index.docker.io/v1/') {
+                    sh '''
+                        docker-scout quickview adminprasad/zomato:latest
+                        docker-scout cves adminprasad/zomato:latest
+                        docker-scout recommendations adminprasad/zomato:latest
+                    '''
                 }
             }
         }
 
-        stage("Deploy to Container") {
+        stage('Deploy Container') {
             steps {
-                sh "docker rm -f zomato || true"
-                sh "docker run -d --name zomato -p 3000:3000 adminprasad/zomato:latest"
+                echo 'Deploying container...'
+                sh '''
+                    docker rm -f zomato || true
+                    docker run -d --name zomato -p 3000:3000 adminprasad/zomato:latest
+                '''
             }
         }
+    }
 
-    } // end stages
+    post {
+        always {
+            echo 'Pipeline execution completed.'
+        }
+    }
 }
