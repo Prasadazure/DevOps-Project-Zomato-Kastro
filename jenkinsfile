@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     tools {
-        jdk 'jdk17'          // Matches name in Jenkins Global Tool Configuration
-        nodejs 'node23'      // Matches installed NodeJS tool in Jenkins
+        jdk 'jdk17'          // Must match the name in Jenkins Global Tool Configuration
+        nodejs 'node23'      // Must match installed NodeJS tool in Jenkins
     }
 
     environment {
@@ -102,7 +102,7 @@ pipeline {
 
         stage('Deploy to Container') {
             steps {
-                sh 'docker rm -f zomato || true'  // Remove previous container if exists
+                sh 'docker rm -f zomato || true'  // remove previous container if exists
                 sh 'docker run -d --name zomato -p 3000:3000 adminprasad/zomato:latest'
             }
         }
