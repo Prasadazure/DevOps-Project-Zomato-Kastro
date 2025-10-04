@@ -1,13 +1,14 @@
 pipeline {
     agent any
 
-    tools {
-        jdk 'jdk17'           // Must match the name in Jenkins Global Tool Configuration
-        nodejs 'node23'       // Must match installed NodeJS tool in Jenkins
+    environment {
+        JAVA_HOME = '/usr/lib/jvm/temurin-17'          // Your installed JDK path
+        PATH = "${env.JAVA_HOME}/bin:${env.PATH}"     // Add JDK bin to PATH
+        SCANNER_HOME = tool 'sonar-scanner'           // SonarQube scanner tool
     }
 
-    environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+    tools {
+        nodejs 'node23'    // NodeJS installed in Jenkins Global Tool Config
     }
 
     stages {
@@ -36,16 +37,11 @@ pipeline {
         stage('Sonarqube Analysis') {
             steps {
                 withSonarQubeEnv('sonar-server') {
-                    withEnv([
-                        "JAVA_HOME=${tool 'jdk17'}",
-                        "PATH+JAVA=${tool 'jdk17'}/bin"
-                    ]) {
-                        sh '''
-                            $SCANNER_HOME/bin/sonar-scanner \
-                            -Dsonar.projectName=zomato \
-                            -Dsonar.projectKey=zomato
-                        '''
-                    }
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato
+                    '''
                 }
             }
         }
@@ -102,7 +98,7 @@ pipeline {
 
         stage('Deploy to Container') {
             steps {
-                sh 'docker rm -f zomato || true'   // remove previous container if exists
+                sh 'docker rm -f zomato || true'  // Remove previous container if exists
                 sh 'docker run -d --name zomato -p 3000:3000 adminprasad/zomato:latest'
             }
         }
